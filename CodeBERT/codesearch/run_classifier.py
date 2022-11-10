@@ -134,7 +134,7 @@ def train(args, train_dataset, model, tokenizer, optimizer):
                     if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
                         results = evaluate(args, model, tokenizer, checkpoint=str(global_step))
                         for key, value in results.items():
-                            tb_writer.add_scalar('eval_{}'.format(key), value, global_step)
+                            tb_writer.add_scalar(f'eval_{key}', value, global_step)
                             logger.info('loss %s', str(tr_loss - logging_loss))
                     tb_writer.add_scalar('lr', scheduler.get_lr()[0], global_step)
                     tb_writer.add_scalar('loss', (tr_loss - logging_loss) / args.logging_steps, global_step)
@@ -173,7 +173,7 @@ def train(args, train_dataset, model, tokenizer, optimizer):
                 model_to_save = model.module if hasattr(model,
                                                         'module') else model  # Take care of distributed/parallel training
                 model_to_save.save_pretrained(output_dir)
-                torch.save(args, os.path.join(output_dir, 'training_{}.bin'.format(idx)))
+                torch.save(args, os.path.join(output_dir, f'training_{idx}.bin'))
                 logger.info("Saving model checkpoint to %s", output_dir)
 
                 torch.save(optimizer.state_dict(), os.path.join(output_dir, "optimizer.pt"))
@@ -216,7 +216,7 @@ def evaluate(args, model, tokenizer, checkpoint=None, prefix="", mode='dev'):
         eval_dataloader = DataLoader(eval_dataset, sampler=eval_sampler, batch_size=args.eval_batch_size)
 
         # Eval!
-        logger.info("***** Running evaluation {} *****".format(prefix))
+        logger.info(f"***** Running evaluation {prefix} *****")
         logger.info("  Num examples = %d", len(eval_dataset))
         logger.info("  Batch size = %d", args.eval_batch_size)
         eval_loss = 0.0
@@ -252,11 +252,11 @@ def evaluate(args, model, tokenizer, checkpoint=None, prefix="", mode='dev'):
         if args.output_mode == "classification":
             preds_label = np.argmax(preds, axis=1)
         result = compute_metrics(eval_task, preds_label, out_label_ids)
-        results.update(result)
+        results |= result
         if (mode == 'dev'):
             output_eval_file = os.path.join(eval_output_dir, "eval_results.txt")
             with open(output_eval_file, "a+") as writer:
-                logger.info("***** Eval results {} *****".format(prefix))
+                logger.info(f"***** Eval results {prefix} *****")
                 writer.write('evaluate %s\n' % checkpoint)
                 for key in sorted(result.keys()):
                     logger.info("  %s = %s", key, str(result[key]))
@@ -273,9 +273,14 @@ def evaluate(args, model, tokenizer, checkpoint=None, prefix="", mode='dev'):
                     instance_rep = '<CODESPLIT>'.join(
                         [item.encode('ascii', 'ignore').decode('ascii') for item in instances[i]])
 
-                    writer.write(instance_rep + '<CODESPLIT>' + '<CODESPLIT>'.join([str(l) for l in logit]) + '\n')
+                    writer.write(
+                        f'{instance_rep}<CODESPLIT>'
+                        + '<CODESPLIT>'.join([str(l) for l in logit])
+                        + '\n'
+                    )
+
                 for key in sorted(result.keys()):
-                    print("%s = %s" % (key, str(result[key])))
+                    print(f"{key} = {str(result[key])}")
 
     return results
 
@@ -290,12 +295,11 @@ def load_and_cache_examples(args, task, tokenizer, ttype='train'):
         file_name = args.dev_file.split('.')[0]
     elif ttype == 'test':
         file_name = args.test_file.split('.')[0]
-    cached_features_file = os.path.join(args.data_dir, 'cached_{}_{}_{}_{}_{}'.format(
-        ttype,
-        file_name,
-        list(filter(None, args.model_name_or_path.split('/'))).pop(),
-        str(args.max_seq_length),
-        str(task)))
+    cached_features_file = os.path.join(
+        args.data_dir,
+        f"cached_{ttype}_{file_name}_{list(filter(None, args.model_name_or_path.split('/'))).pop()}_{str(args.max_seq_length)}_{str(task)}",
+    )
+
 
     # if os.path.exists(cached_features_file):
     try:
@@ -313,15 +317,20 @@ def load_and_cache_examples(args, task, tokenizer, ttype='train'):
         elif ttype == 'test':
             examples, instances = processor.get_test_examples(args.data_dir, args.test_file)
 
-        features = convert_examples_to_features(examples, label_list, args.max_seq_length, tokenizer, output_mode,
-                                                cls_token_at_end=bool(args.model_type in ['xlnet']),
-                                                # xlnet has a cls token at the end
-                                                cls_token=tokenizer.cls_token,
-                                                sep_token=tokenizer.sep_token,
-                                                cls_token_segment_id=2 if args.model_type in ['xlnet'] else 1,
-                                                pad_on_left=bool(args.model_type in ['xlnet']),
-                                                # pad on the left for xlnet
-                                                pad_token_segment_id=4 if args.model_type in ['xlnet'] else 0)
+        features = convert_examples_to_features(
+            examples,
+            label_list,
+            args.max_seq_length,
+            tokenizer,
+            output_mode,
+            cls_token_at_end=args.model_type in ['xlnet'],
+            cls_token=tokenizer.cls_token,
+            sep_token=tokenizer.sep_token,
+            cls_token_segment_id=2 if args.model_type in ['xlnet'] else 1,
+            pad_on_left=args.model_type in ['xlnet'],
+            pad_token_segment_id=4 if args.model_type in ['xlnet'] else 0,
+        )
+
         if args.local_rank in [-1, 0]:
             logger.info("Saving features into cached file %s", cached_features_file)
             torch.save(features, cached_features_file)
@@ -333,10 +342,7 @@ def load_and_cache_examples(args, task, tokenizer, ttype='train'):
         all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.long)
 
     dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids)
-    if (ttype == 'test'):
-        return dataset, instances
-    else:
-        return dataset
+    return (dataset, instances) if (ttype == 'test') else dataset
 
 
 def main():

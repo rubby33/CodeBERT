@@ -104,37 +104,36 @@ def convert_examples_to_features(examples, tokenizer, args,stage=None):
         #source
         source_tokens = tokenizer.tokenize(example.source)[:args.max_source_length-2]
         source_tokens =[tokenizer.cls_token]+source_tokens+[tokenizer.sep_token]
-        source_ids =  tokenizer.convert_tokens_to_ids(source_tokens) 
+        source_ids =  tokenizer.convert_tokens_to_ids(source_tokens)
         source_mask = [1] * (len(source_tokens))
         padding_length = args.max_source_length - len(source_ids)
         source_ids+=[tokenizer.pad_token_id]*padding_length
         source_mask+=[0]*padding_length
- 
+
         #target
         if stage=="test":
             target_tokens = tokenizer.tokenize("None")
         else:
             target_tokens = tokenizer.tokenize(example.target)[:args.max_target_length-2]
-        target_tokens = [tokenizer.cls_token]+target_tokens+[tokenizer.sep_token]            
+        target_tokens = [tokenizer.cls_token]+target_tokens+[tokenizer.sep_token]
         target_ids = tokenizer.convert_tokens_to_ids(target_tokens)
         target_mask = [1] *len(target_ids)
         padding_length = args.max_target_length - len(target_ids)
         target_ids+=[tokenizer.pad_token_id]*padding_length
         target_mask+=[0]*padding_length   
-   
-        if example_index < 5:
-            if stage=='train':
-                logger.info("*** Example ***")
-                logger.info("idx: {}".format(example.idx))
 
-                logger.info("source_tokens: {}".format([x.replace('\u0120','_') for x in source_tokens]))
-                logger.info("source_ids: {}".format(' '.join(map(str, source_ids))))
-                logger.info("source_mask: {}".format(' '.join(map(str, source_mask))))
-                
-                logger.info("target_tokens: {}".format([x.replace('\u0120','_') for x in target_tokens]))
-                logger.info("target_ids: {}".format(' '.join(map(str, target_ids))))
-                logger.info("target_mask: {}".format(' '.join(map(str, target_mask))))
-       
+        if example_index < 5 and stage == 'train':
+            logger.info("*** Example ***")
+            logger.info(f"idx: {example.idx}")
+
+            logger.info("source_tokens: {}".format([x.replace('\u0120','_') for x in source_tokens]))
+            logger.info(f"source_ids: {' '.join(map(str, source_ids))}")
+            logger.info(f"source_mask: {' '.join(map(str, source_mask))}")
+
+            logger.info("target_tokens: {}".format([x.replace('\u0120','_') for x in target_tokens]))
+            logger.info(f"target_ids: {' '.join(map(str, target_ids))}")
+            logger.info(f"target_mask: {' '.join(map(str, target_mask))}")
+
         features.append(
             InputFeatures(
                  example_index,

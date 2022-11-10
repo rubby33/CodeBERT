@@ -75,19 +75,21 @@ def extract_dataflow(code, parser,lang):
     try:
         code=remove_comments_and_docstrings(code,lang)
     except:
-        pass    
+        pass
     #obtain dataflow
     if lang=="php":
-        code="<?php"+code+"?>"    
+        code = f"<?php{code}?>"
     try:
-        tree = parser[0].parse(bytes(code,'utf8'))    
-        root_node = tree.root_node  
-        tokens_index=tree_to_token_index(root_node)     
+        tree = parser[0].parse(bytes(code,'utf8'))
+        root_node = tree.root_node
+        tokens_index=tree_to_token_index(root_node)
         code=code.split('\n')
-        code_tokens=[index_to_code_token(x,code) for x in tokens_index]  
-        index_to_code={}
-        for idx,(index,code) in enumerate(zip(tokens_index,code_tokens)):
-            index_to_code[index]=(idx,code)  
+        code_tokens=[index_to_code_token(x,code) for x in tokens_index]
+        index_to_code = {
+            index: (idx, code)
+            for idx, (index, code) in enumerate(zip(tokens_index, code_tokens))
+        }
+
         try:
             DFG,_=parser[1](root_node,index_to_code,{}) 
         except:
@@ -99,10 +101,7 @@ def extract_dataflow(code, parser,lang):
                 indexs.add(d[1])
             for x in d[-1]:
                 indexs.add(x)
-        new_DFG=[]
-        for d in DFG:
-            if d[1] in indexs:
-                new_DFG.append(d)
+        new_DFG = [d for d in DFG if d[1] in indexs]
         dfg=new_DFG
     except:
         dfg=[]
@@ -164,13 +163,18 @@ def convert_examples_to_features(examples, tokenizer, args,stage=None):
     for example_index, example in enumerate(tqdm(examples,total=len(examples))):
         ##extract data flow
         code_tokens,dfg=extract_dataflow(example.source,parsers['java'],'java')
-        code_tokens=[tokenizer.tokenize('@ '+x)[1:] if idx!=0 else tokenizer.tokenize(x) for idx,x in enumerate(code_tokens)]
-        ori2cur_pos={}
-        ori2cur_pos[-1]=(0,0)
+        code_tokens = [
+            tokenizer.tokenize(f'@ {x}')[1:]
+            if idx != 0
+            else tokenizer.tokenize(x)
+            for idx, x in enumerate(code_tokens)
+        ]
+
+        ori2cur_pos = {-1: (0, 0)}
         for i in range(len(code_tokens)):
-            ori2cur_pos[i]=(ori2cur_pos[i-1][1],ori2cur_pos[i-1][1]+len(code_tokens[i]))    
+            ori2cur_pos[i]=(ori2cur_pos[i-1][1],ori2cur_pos[i-1][1]+len(code_tokens[i]))
         code_tokens=[y for x in code_tokens for y in x]  
-        
+
         #truncating
         code_tokens=code_tokens[:args.max_source_length-3]
         source_tokens =[tokenizer.cls_token]+code_tokens+[tokenizer.sep_token]
@@ -178,20 +182,18 @@ def convert_examples_to_features(examples, tokenizer, args,stage=None):
         position_idx = [i+tokenizer.pad_token_id + 1 for i in range(len(source_tokens))]
         dfg=dfg[:args.max_source_length-len(source_tokens)]
         source_tokens+=[x[0] for x in dfg]
-        position_idx+=[0 for x in dfg]
-        source_ids+=[tokenizer.unk_token_id for x in dfg]
+        position_idx += [0 for _ in dfg]
+        source_ids += [tokenizer.unk_token_id for _ in dfg]
         padding_length=args.max_source_length-len(source_ids)
         position_idx+=[tokenizer.pad_token_id]*padding_length
-        source_ids+=[tokenizer.pad_token_id]*padding_length      
+        source_ids+=[tokenizer.pad_token_id]*padding_length
         source_mask = [1] * (len(source_tokens))
         source_mask+=[0]*padding_length        
-        
+
         #reindex
-        reverse_index={}
+        reverse_index = {x[1]: idx for idx, x in enumerate(dfg)}
         for idx,x in enumerate(dfg):
-            reverse_index[x[1]]=idx
-        for idx,x in enumerate(dfg):
-            dfg[idx]=x[:-1]+([reverse_index[i] for i in x[-1] if i in reverse_index],)    
+            dfg[idx]=x[:-1]+([reverse_index[i] for i in x[-1] if i in reverse_index],)
         dfg_to_dfg=[x[-1] for x in dfg]
         dfg_to_code=[ori2cur_pos[x[1]] for x in dfg]
         length=len([tokenizer.cls_token])
@@ -202,27 +204,26 @@ def convert_examples_to_features(examples, tokenizer, args,stage=None):
             target_tokens = tokenizer.tokenize("None")
         else:
             target_tokens = tokenizer.tokenize(example.target)[:args.max_target_length-2]
-        target_tokens = [tokenizer.cls_token]+target_tokens+[tokenizer.sep_token]            
+        target_tokens = [tokenizer.cls_token]+target_tokens+[tokenizer.sep_token]
         target_ids = tokenizer.convert_tokens_to_ids(target_tokens)
         target_mask = [1] *len(target_ids)
         padding_length = args.max_target_length - len(target_ids)
         target_ids+=[tokenizer.pad_token_id]*padding_length
         target_mask+=[0]*padding_length   
-   
-        if example_index < 5:
-            if stage=='train':
-                logger.info("*** Example ***")
-                logger.info("source_tokens: {}".format([x.replace('\u0120','_') for x in source_tokens]))
-                logger.info("source_ids: {}".format(' '.join(map(str, source_ids))))
-                logger.info("source_mask: {}".format(' '.join(map(str, source_mask))))
-                logger.info("position_idx: {}".format(position_idx))
-                logger.info("dfg_to_code: {}".format(' '.join(map(str, dfg_to_code))))
-                logger.info("dfg_to_dfg: {}".format(' '.join(map(str, dfg_to_dfg))))
-                
-                logger.info("target_tokens: {}".format([x.replace('\u0120','_') for x in target_tokens]))
-                logger.info("target_ids: {}".format(' '.join(map(str, target_ids))))
-                logger.info("target_mask: {}".format(' '.join(map(str, target_mask))))
-       
+
+        if example_index < 5 and stage == 'train':
+            logger.info("*** Example ***")
+            logger.info("source_tokens: {}".format([x.replace('\u0120','_') for x in source_tokens]))
+            logger.info(f"source_ids: {' '.join(map(str, source_ids))}")
+            logger.info(f"source_mask: {' '.join(map(str, source_mask))}")
+            logger.info(f"position_idx: {position_idx}")
+            logger.info(f"dfg_to_code: {' '.join(map(str, dfg_to_code))}")
+            logger.info(f"dfg_to_dfg: {' '.join(map(str, dfg_to_dfg))}")
+
+            logger.info("target_tokens: {}".format([x.replace('\u0120','_') for x in target_tokens]))
+            logger.info(f"target_ids: {' '.join(map(str, target_ids))}")
+            logger.info(f"target_mask: {' '.join(map(str, target_mask))}")
+
         features.append(
             InputFeatures(
                  example_index,
@@ -249,8 +250,8 @@ class TextDataset(Dataset):
         #calculate graph-guided masked function
         attn_mask=np.zeros((self.args.max_source_length,self.args.max_source_length),dtype=np.bool)
         #calculate begin index of node and max length of input
-        node_index=sum([i>1 for i in self.examples[item].position_idx])
-        max_length=sum([i!=1 for i in self.examples[item].position_idx])
+        node_index = sum(i>1 for i in self.examples[item].position_idx)
+        max_length = sum(i!=1 for i in self.examples[item].position_idx)
         #sequence can attend to sequence
         attn_mask[:node_index,:node_index]=True
         #special tokens attend to all tokens
@@ -267,7 +268,7 @@ class TextDataset(Dataset):
             for a in nodes:
                 if a+node_index<len(self.examples[item].position_idx):
                     attn_mask[idx+node_index,a+node_index]=True  
-                    
+
         return (torch.tensor(self.examples[item].source_ids),
                 torch.tensor(self.examples[item].source_mask),
                 torch.tensor(self.examples[item].position_idx),

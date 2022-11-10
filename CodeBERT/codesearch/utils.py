@@ -79,7 +79,7 @@ class DataProcessor(object):
         """Reads a tab separated value file."""
         with open(input_file, "r", encoding='utf-8') as f:
             lines = []
-            for line in f.readlines():
+            for line in f:
                 line = line.strip().split('<CODESPLIT>')
                 if len(line) != 5:
                     continue
@@ -92,19 +92,19 @@ class CodesearchProcessor(DataProcessor):
 
     def get_train_examples(self, data_dir, train_file):
         """See base class."""
-        logger.info("LOOKING AT {}".format(os.path.join(data_dir, train_file)))
+        logger.info(f"LOOKING AT {os.path.join(data_dir, train_file)}")
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, train_file)), "train")
 
     def get_dev_examples(self, data_dir, dev_file):
         """See base class."""
-        logger.info("LOOKING AT {}".format(os.path.join(data_dir, dev_file)))
+        logger.info(f"LOOKING AT {os.path.join(data_dir, dev_file)}")
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, dev_file)), "dev")
 
     def get_test_examples(self, data_dir, test_file):
         """See base class."""
-        logger.info("LOOKING AT {}".format(os.path.join(data_dir, test_file)))
+        logger.info(f"LOOKING AT {os.path.join(data_dir, test_file)}")
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, test_file)), "test")
 
@@ -116,19 +116,13 @@ class CodesearchProcessor(DataProcessor):
         """Creates examples for the training and dev sets."""
         examples = []
         for (i, line) in enumerate(lines):
-            guid = "%s-%s" % (set_type, i)
+            guid = f"{set_type}-{i}"
             text_a = line[3]
             text_b = line[4]
-            if (set_type == 'test'):
-                label = self.get_labels()[0]
-            else:
-                label = line[0]
+            label = self.get_labels()[0] if (set_type == 'test') else line[0]
             examples.append(
                 InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
-        if (set_type == 'test'):
-            return examples, lines
-        else:
-            return examples
+        return (examples, lines) if (set_type == 'test') else examples
 
 
 def convert_examples_to_features(examples, label_list, max_seq_length,
@@ -161,10 +155,8 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
             # length is less than the specified length.
             # Account for [CLS], [SEP], [SEP] with "- 3"
             _truncate_seq_pair(tokens_a, tokens_b, max_seq_length - 3)
-        else:
-            # Account for [CLS] and [SEP] with "- 2"
-            if len(tokens_a) > max_seq_length - 2:
-                tokens_a = tokens_a[:(max_seq_length - 2)]
+        elif len(tokens_a) > max_seq_length - 2:
+            tokens_a = tokens_a[:(max_seq_length - 2)]
 
         # The convention in BERT is:
         # (a) For sequence pairs:
@@ -228,12 +220,12 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
 
         if ex_index < 5:
             logger.info("*** Example ***")
-            logger.info("guid: %s" % (example.guid))
+            logger.info(f"guid: {example.guid}")
             logger.info("tokens: %s" % " ".join(
                 [str(x) for x in tokens]))
-            logger.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
-            logger.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
-            logger.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
+            logger.info(f'input_ids: {" ".join([str(x) for x in input_ids])}')
+            logger.info(f'input_mask: {" ".join([str(x) for x in input_mask])}')
+            logger.info(f'segment_ids: {" ".join([str(x) for x in segment_ids])}')
             logger.info("label: %s (id = %d)" % (example.label, label_id))
 
         features.append(

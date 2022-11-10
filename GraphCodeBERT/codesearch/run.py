@@ -70,19 +70,21 @@ def extract_dataflow(code, parser,lang):
     try:
         code=remove_comments_and_docstrings(code,lang)
     except:
-        pass    
+        pass
     #obtain dataflow
     if lang=="php":
-        code="<?php"+code+"?>"    
+        code = f"<?php{code}?>"
     try:
-        tree = parser[0].parse(bytes(code,'utf8'))    
-        root_node = tree.root_node  
-        tokens_index=tree_to_token_index(root_node)     
+        tree = parser[0].parse(bytes(code,'utf8'))
+        root_node = tree.root_node
+        tokens_index=tree_to_token_index(root_node)
         code=code.split('\n')
-        code_tokens=[index_to_code_token(x,code) for x in tokens_index]  
-        index_to_code={}
-        for idx,(index,code) in enumerate(zip(tokens_index,code_tokens)):
-            index_to_code[index]=(idx,code)  
+        code_tokens=[index_to_code_token(x,code) for x in tokens_index]
+        index_to_code = {
+            index: (idx, code)
+            for idx, (index, code) in enumerate(zip(tokens_index, code_tokens))
+        }
+
         try:
             DFG,_=parser[1](root_node,index_to_code,{}) 
         except:
@@ -94,10 +96,7 @@ def extract_dataflow(code, parser,lang):
                 indexs.add(d[1])
             for x in d[-1]:
                 indexs.add(x)
-        new_DFG=[]
-        for d in DFG:
-            if d[1] in indexs:
-                new_DFG.append(d)
+        new_DFG = [d for d in DFG if d[1] in indexs]
         dfg=new_DFG
     except:
         dfg=[]
@@ -132,12 +131,15 @@ def convert_examples_to_features(item):
     parser=parsers[args.lang]
     #extract data flow
     code_tokens,dfg=extract_dataflow(js['original_string'],parser,args.lang)
-    code_tokens=[tokenizer.tokenize('@ '+x)[1:] if idx!=0 else tokenizer.tokenize(x) for idx,x in enumerate(code_tokens)]
-    ori2cur_pos={}
-    ori2cur_pos[-1]=(0,0)
+    code_tokens = [
+        tokenizer.tokenize(f'@ {x}')[1:] if idx != 0 else tokenizer.tokenize(x)
+        for idx, x in enumerate(code_tokens)
+    ]
+
+    ori2cur_pos = {-1: (0, 0)}
     for i in range(len(code_tokens)):
-        ori2cur_pos[i]=(ori2cur_pos[i-1][1],ori2cur_pos[i-1][1]+len(code_tokens[i]))    
-    code_tokens=[y for x in code_tokens for y in x]  
+        ori2cur_pos[i]=(ori2cur_pos[i-1][1],ori2cur_pos[i-1][1]+len(code_tokens[i]))
+    code_tokens=[y for x in code_tokens for y in x]
     #truncating
     code_tokens=code_tokens[:args.code_length+args.data_flow_length-2-min(len(dfg),args.data_flow_length)]
     code_tokens =[tokenizer.cls_token]+code_tokens+[tokenizer.sep_token]
@@ -145,21 +147,19 @@ def convert_examples_to_features(item):
     position_idx = [i+tokenizer.pad_token_id + 1 for i in range(len(code_tokens))]
     dfg=dfg[:args.code_length+args.data_flow_length-len(code_tokens)]
     code_tokens+=[x[0] for x in dfg]
-    position_idx+=[0 for x in dfg]
-    code_ids+=[tokenizer.unk_token_id for x in dfg]
+    position_idx += [0 for _ in dfg]
+    code_ids += [tokenizer.unk_token_id for _ in dfg]
     padding_length=args.code_length+args.data_flow_length-len(code_ids)
     position_idx+=[tokenizer.pad_token_id]*padding_length
-    code_ids+=[tokenizer.pad_token_id]*padding_length    
+    code_ids+=[tokenizer.pad_token_id]*padding_length
     #reindex
-    reverse_index={}
+    reverse_index = {x[1]: idx for idx, x in enumerate(dfg)}
     for idx,x in enumerate(dfg):
-        reverse_index[x[1]]=idx
-    for idx,x in enumerate(dfg):
-        dfg[idx]=x[:-1]+([reverse_index[i] for i in x[-1] if i in reverse_index],)    
+        dfg[idx]=x[:-1]+([reverse_index[i] for i in x[-1] if i in reverse_index],)
     dfg_to_dfg=[x[-1] for x in dfg]
     dfg_to_code=[ori2cur_pos[x[1]] for x in dfg]
     length=len([tokenizer.cls_token])
-    dfg_to_code=[(x[0]+length,x[1]+length) for x in dfg_to_code]        
+    dfg_to_code=[(x[0]+length,x[1]+length) for x in dfg_to_code]
     #nl
     nl=' '.join(js['docstring_tokens'])
     nl_tokens=tokenizer.tokenize(nl)[:args.nl_length-2]
@@ -167,14 +167,14 @@ def convert_examples_to_features(item):
     nl_ids =  tokenizer.convert_tokens_to_ids(nl_tokens)
     padding_length = args.nl_length - len(nl_ids)
     nl_ids+=[tokenizer.pad_token_id]*padding_length    
-    
+
     return InputFeatures(code_tokens,code_ids,position_idx,dfg_to_code,dfg_to_dfg,nl_tokens,nl_ids,js['url'])
 
 class TextDataset(Dataset):
     def __init__(self, tokenizer, args, file_path=None,pool=None):
         self.args=args
         prefix=file_path.split('/')[-1][:-6]
-        cache_file=args.output_dir+'/'+prefix+'.pkl'
+        cache_file = f'{args.output_dir}/{prefix}.pkl'
         if os.path.exists(cache_file):
             self.examples=pickle.load(open(cache_file,'rb'))
         else:
@@ -187,18 +187,18 @@ class TextDataset(Dataset):
                     data.append((js,tokenizer,args))
             self.examples=pool.map(convert_examples_to_features, tqdm(data,total=len(data)))
             pickle.dump(self.examples,open(cache_file,'wb'))
-            
+
         if 'train' in file_path:
             for idx, example in enumerate(self.examples[:3]):
                 logger.info("*** Example ***")
-                logger.info("idx: {}".format(idx))
+                logger.info(f"idx: {idx}")
                 logger.info("code_tokens: {}".format([x.replace('\u0120','_') for x in example.code_tokens]))
-                logger.info("code_ids: {}".format(' '.join(map(str, example.code_ids))))
-                logger.info("position_idx: {}".format(example.position_idx))
-                logger.info("dfg_to_code: {}".format(' '.join(map(str, example.dfg_to_code))))
-                logger.info("dfg_to_dfg: {}".format(' '.join(map(str, example.dfg_to_dfg))))                
+                logger.info(f"code_ids: {' '.join(map(str, example.code_ids))}")
+                logger.info(f"position_idx: {example.position_idx}")
+                logger.info(f"dfg_to_code: {' '.join(map(str, example.dfg_to_code))}")
+                logger.info(f"dfg_to_dfg: {' '.join(map(str, example.dfg_to_dfg))}")
                 logger.info("nl_tokens: {}".format([x.replace('\u0120','_') for x in example.nl_tokens]))
-                logger.info("nl_ids: {}".format(' '.join(map(str, example.nl_ids))))          
+                logger.info(f"nl_ids: {' '.join(map(str, example.nl_ids))}")          
                 
     def __len__(self):
         return len(self.examples)
@@ -208,8 +208,8 @@ class TextDataset(Dataset):
         attn_mask=np.zeros((self.args.code_length+self.args.data_flow_length,
                             self.args.code_length+self.args.data_flow_length),dtype=np.bool)
         #calculate begin index of node and max length of input
-        node_index=sum([i>1 for i in self.examples[item].position_idx])
-        max_length=sum([i!=1 for i in self.examples[item].position_idx])
+        node_index = sum(i>1 for i in self.examples[item].position_idx)
+        max_length = sum(i!=1 for i in self.examples[item].position_idx)
         #sequence can attend to sequence
         attn_mask[:node_index,:node_index]=True
         #special tokens attend to all tokens
@@ -226,7 +226,7 @@ class TextDataset(Dataset):
             for a in nodes:
                 if a+node_index<len(self.examples[item].position_idx):
                     attn_mask[idx+node_index,a+node_index]=True  
-                    
+
         return (torch.tensor(self.examples[item].code_ids),
               torch.tensor(attn_mask),
               torch.tensor(self.examples[item].position_idx), 
@@ -248,11 +248,11 @@ def train(args, model, tokenizer,pool):
     train_dataset=TextDataset(tokenizer, args, args.train_data_file, pool)
     train_sampler = RandomSampler(train_dataset)
     train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size,num_workers=4)
-    
+
     #get optimizer and scheduler
     optimizer = AdamW(model.parameters(), lr=args.learning_rate, eps=1e-8)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0,num_training_steps=len(train_dataloader)*args.num_train_epochs)
-    
+
     # multi-gpu training (should be after apex fp16 initialization)
     if args.n_gpu > 1:
         model = torch.nn.DataParallel(model)
@@ -264,61 +264,61 @@ def train(args, model, tokenizer,pool):
     logger.info("  Instantaneous batch size per GPU = %d", args.train_batch_size//args.n_gpu)
     logger.info("  Total train batch size  = %d", args.train_batch_size)
     logger.info("  Total optimization steps = %d", len(train_dataloader)*args.num_train_epochs)
-    
+
     # model.resize_token_embeddings(len(tokenizer))
     model.zero_grad()
-    
+
     model.train()
-    tr_num,tr_loss,best_mrr=0,0,0 
+    tr_num,tr_loss,best_mrr=0,0,0
     for idx in range(args.num_train_epochs): 
         for step,batch in enumerate(train_dataloader):
             #get inputs
-            code_inputs = batch[0].to(args.device)  
+            code_inputs = batch[0].to(args.device)
             attn_mask = batch[1].to(args.device)
             position_idx = batch[2].to(args.device)
             nl_inputs = batch[3].to(args.device)
             #get code and nl vectors
             code_vec = model(code_inputs=code_inputs,attn_mask=attn_mask,position_idx=position_idx)
             nl_vec = model(nl_inputs=nl_inputs)
-            
+
             #calculate scores and loss
             scores=torch.einsum("ab,cb->ac",nl_vec,code_vec)
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(scores, torch.arange(code_inputs.size(0), device=scores.device))
-            
+
             #report loss
             tr_loss += loss.item()
             tr_num+=1
             if (step+1)% 100==0:
-                logger.info("epoch {} step {} loss {}".format(idx,step+1,round(tr_loss/tr_num,5)))
+                logger.info(f"epoch {idx} step {step + 1} loss {round(tr_loss / tr_num, 5)}")
                 tr_loss=0
                 tr_num=0
-            
+
             #backward
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
             optimizer.step()
             optimizer.zero_grad()
             scheduler.step() 
-            
+
         #evaluate    
         results = evaluate(args, model, tokenizer,args.eval_data_file, pool, eval_when_training=True)
         for key, value in results.items():
             logger.info("  %s = %s", key, round(value,4))    
-            
+
         #save best model
         if results['eval_mrr']>best_mrr:
             best_mrr=results['eval_mrr']
-            logger.info("  "+"*"*20)  
+            logger.info("  "+"*"*20)
             logger.info("  Best mrr:%s",round(best_mrr,4))
             logger.info("  "+"*"*20)                          
 
             checkpoint_prefix = 'checkpoint-best-mrr'
-            output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))                        
+            output_dir = os.path.join(args.output_dir, f'{checkpoint_prefix}')
             if not os.path.exists(output_dir):
-                os.makedirs(output_dir)                        
+                os.makedirs(output_dir)
             model_to_save = model.module if hasattr(model,'module') else model
-            output_dir = os.path.join(output_dir, '{}'.format('model.bin')) 
+            output_dir = os.path.join(output_dir, 'model.bin')
             torch.save(model_to_save.state_dict(), output_dir)
             logger.info("Saving model checkpoint to %s", output_dir)
 
@@ -327,7 +327,7 @@ def evaluate(args, model, tokenizer,file_name,pool, eval_when_training=False):
     query_dataset = TextDataset(tokenizer, args, file_name, pool)
     query_sampler = SequentialSampler(query_dataset)
     query_dataloader = DataLoader(query_dataset, sampler=query_sampler, batch_size=args.eval_batch_size,num_workers=4)
-    
+
     code_dataset = TextDataset(tokenizer, args, args.codebase_file, pool)
     code_sampler = SequentialSampler(code_dataset)
     code_dataloader = DataLoader(code_dataset, sampler=code_sampler, batch_size=args.eval_batch_size,num_workers=4)    
@@ -342,9 +342,9 @@ def evaluate(args, model, tokenizer,file_name,pool, eval_when_training=False):
     logger.info("  Num codes = %d", len(code_dataset))
     logger.info("  Batch size = %d", args.eval_batch_size)
 
-    
+
     model.eval()
-    code_vecs=[] 
+    code_vecs=[]
     nl_vecs=[]
     for batch in query_dataloader:  
         nl_inputs = batch[3].to(args.device)
@@ -358,23 +358,17 @@ def evaluate(args, model, tokenizer,file_name,pool, eval_when_training=False):
         position_idx =batch[2].to(args.device)
         with torch.no_grad():
             code_vec= model(code_inputs=code_inputs, attn_mask=attn_mask,position_idx=position_idx)
-            code_vecs.append(code_vec.cpu().numpy())  
-    model.train()    
+            code_vecs.append(code_vec.cpu().numpy())
+    model.train()
     code_vecs=np.concatenate(code_vecs,0)
     nl_vecs=np.concatenate(nl_vecs,0)
 
     scores=np.matmul(nl_vecs,code_vecs.T)
-    
+
     sort_ids=np.argsort(scores, axis=-1, kind='quicksort', order=None)[:,::-1]    
-    
-    nl_urls=[]
-    code_urls=[]
-    for example in query_dataset.examples:
-        nl_urls.append(example.url)
-        
-    for example in code_dataset.examples:
-        code_urls.append(example.url)
-        
+
+    nl_urls = [example.url for example in query_dataset.examples]
+    code_urls = [example.url for example in code_dataset.examples]
     ranks=[]
     for url, sort_id in zip(nl_urls,sort_ids):
         rank=0
@@ -388,12 +382,8 @@ def evaluate(args, model, tokenizer,file_name,pool, eval_when_training=False):
             ranks.append(1/rank)
         else:
             ranks.append(0)
-    
-    result = {
-        "eval_mrr":float(np.mean(ranks))
-    }
 
-    return result
+    return {"eval_mrr": float(np.mean(ranks))}
 
                         
                         
@@ -411,31 +401,31 @@ def main():
                         help="An optional input test data file to test the MRR(a josnl file).")
     parser.add_argument("--codebase_file", default=None, type=str,
                         help="An optional input test data file to codebase (a jsonl file).")  
-    
+
     parser.add_argument("--lang", default=None, type=str,
                         help="language.")  
-    
+
     parser.add_argument("--model_name_or_path", default=None, type=str,
                         help="The model checkpoint for weights initialization.")
     parser.add_argument("--config_name", default="", type=str,
                         help="Optional pretrained config name or path if not the same as model_name_or_path")
     parser.add_argument("--tokenizer_name", default="", type=str,
                         help="Optional pretrained tokenizer name or path if not the same as model_name_or_path")
-    
+
     parser.add_argument("--nl_length", default=128, type=int,
-                        help="Optional NL input sequence length after tokenization.")    
+                        help="Optional NL input sequence length after tokenization.")
     parser.add_argument("--code_length", default=256, type=int,
-                        help="Optional Code input sequence length after tokenization.") 
+                        help="Optional Code input sequence length after tokenization.")
     parser.add_argument("--data_flow_length", default=64, type=int,
                         help="Optional Data Flow input sequence length after tokenization.") 
-    
+
     parser.add_argument("--do_train", action='store_true',
                         help="Whether to run training.")
     parser.add_argument("--do_eval", action='store_true',
                         help="Whether to run eval on the dev set.")
     parser.add_argument("--do_test", action='store_true',
                         help="Whether to run eval on the test set.")  
-    
+
 
     parser.add_argument("--train_batch_size", default=4, type=int,
                         help="Batch size for training.")
@@ -450,12 +440,12 @@ def main():
 
     parser.add_argument('--seed', type=int, default=42,
                         help="random seed for initialization")
-    
+
     pool = multiprocessing.Pool(cpu_cont)
-    
+
     #print arguments
     args = parser.parse_args()
-    
+
     #set log
     logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',level=logging.INFO )
@@ -464,45 +454,46 @@ def main():
     args.n_gpu = torch.cuda.device_count()
     args.device = device
     logger.info("device: %s, n_gpu: %s",device, args.n_gpu)
-    
+
     # Set seed
     set_seed(args.seed)
 
     #build model
-    config = RobertaConfig.from_pretrained(args.config_name if args.config_name else args.model_name_or_path)
+    config = RobertaConfig.from_pretrained(
+        args.config_name or args.model_name_or_path
+    )
+
     tokenizer = RobertaTokenizer.from_pretrained(args.tokenizer_name)
-    model = RobertaModel.from_pretrained(args.model_name_or_path)    
+    model = RobertaModel.from_pretrained(args.model_name_or_path)
     model=Model(model)
     logger.info("Training/evaluation parameters %s", args)
     model.to(args.device)
-    
+
     # Training
     if args.do_train:
         train(args, model, tokenizer, pool)
 
-    # Evaluation
-    results = {}
     if args.do_eval:
         checkpoint_prefix = 'checkpoint-best-mrr/model.bin'
-        output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))  
-        model.load_state_dict(torch.load(output_dir),strict=False)      
+        output_dir = os.path.join(args.output_dir, f'{checkpoint_prefix}')
+        model.load_state_dict(torch.load(output_dir),strict=False)
         model.to(args.device)
         result=evaluate(args, model, tokenizer,args.eval_data_file, pool)
         logger.info("***** Eval results *****")
         for key in sorted(result.keys()):
             logger.info("  %s = %s", key, str(round(result[key],4)))
-            
+
     if args.do_test:
         checkpoint_prefix = 'checkpoint-best-mrr/model.bin'
-        output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))  
-        model.load_state_dict(torch.load(output_dir),strict=False)      
+        output_dir = os.path.join(args.output_dir, f'{checkpoint_prefix}')
+        model.load_state_dict(torch.load(output_dir),strict=False)
         model.to(args.device)
         result=evaluate(args, model, tokenizer,args.test_data_file, pool)
         logger.info("***** Eval results *****")
         for key in sorted(result.keys()):
             logger.info("  %s = %s", key, str(round(result[key],4)))
 
-    return results
+    return {}
 
 
 if __name__ == "__main__":

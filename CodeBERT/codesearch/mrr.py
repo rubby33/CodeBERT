@@ -15,7 +15,7 @@ def main():
     languages = ['ruby', 'go', 'php', 'python', 'java', 'javascript']
     MRR_dict = {}
     for language in languages:
-        file_dir = './results/{}'.format(language)
+        file_dir = f'./results/{language}'
         ranks = []
         num_batch = 0
         for file in sorted(os.listdir(file_dir)):
@@ -30,10 +30,10 @@ def main():
                     ranks.append(rank)
 
         mean_mrr = np.mean(1.0 / np.array(ranks))
-        print("{} mrr: {}".format(language, mean_mrr))
+        print(f"{language} mrr: {mean_mrr}")
         MRR_dict[language] = mean_mrr
     for key, val in MRR_dict.items():
-        print("{} mrr: {}".format(key, val))
+        print(f"{key} mrr: {val}")
 
 
 if __name__ == "__main__":
