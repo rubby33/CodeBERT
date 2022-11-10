@@ -17,7 +17,7 @@ def format_str(string):
 
 
 def preprocess_test_data(language, test_batch_size=1000):
-    path = os.path.join(DATA_DIR, '{}_test_0.jsonl.gz'.format(language))
+    path = os.path.join(DATA_DIR, f'{language}_test_0.jsonl.gz')
     print(path)
     with gzip.open(path, 'r') as pf:
         data = pf.readlines()  
@@ -35,7 +35,7 @@ def preprocess_test_data(language, test_batch_size=1000):
         if len(batch_data) < test_batch_size:
             break # the last batch is smaller than the others, exclude.
         examples = []
-        for d_idx, d in enumerate(batch_data): 
+        for d in batch_data:
             line_a = json.loads(str(d, encoding='utf-8'))
             doc_token = ' '.join(line_a['docstring_tokens'])
             for dd in batch_data:
@@ -46,10 +46,10 @@ def preprocess_test_data(language, test_batch_size=1000):
                 example = '<CODESPLIT>'.join(example)
                 examples.append(example)
 
-        data_path = os.path.join(DATA_DIR, 'test/{}'.format(language))
+        data_path = os.path.join(DATA_DIR, f'test/{language}')
         if not os.path.exists(data_path):
             os.makedirs(data_path)
-        file_path = os.path.join(data_path, 'batch_{}.txt'.format(batch_idx))
+        file_path = os.path.join(data_path, f'batch_{batch_idx}.txt')
         print(file_path)
         with open(file_path, 'w', encoding='utf-8') as f:
             f.writelines('\n'.join(examples))

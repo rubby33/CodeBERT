@@ -74,19 +74,21 @@ def extract_dataflow(code, parser,lang):
     try:
         code=remove_comments_and_docstrings(code,lang)
     except:
-        pass    
+        pass
     #obtain dataflow
     if lang=="php":
-        code="<?php"+code+"?>"    
+        code = f"<?php{code}?>"
     try:
-        tree = parser[0].parse(bytes(code,'utf8'))    
-        root_node = tree.root_node  
-        tokens_index=tree_to_token_index(root_node)     
+        tree = parser[0].parse(bytes(code,'utf8'))
+        root_node = tree.root_node
+        tokens_index=tree_to_token_index(root_node)
         code=code.split('\n')
-        code_tokens=[index_to_code_token(x,code) for x in tokens_index]  
-        index_to_code={}
-        for idx,(index,code) in enumerate(zip(tokens_index,code_tokens)):
-            index_to_code[index]=(idx,code)  
+        code_tokens=[index_to_code_token(x,code) for x in tokens_index]
+        index_to_code = {
+            index: (idx, code)
+            for idx, (index, code) in enumerate(zip(tokens_index, code_tokens))
+        }
+
         try:
             DFG,_=parser[1](root_node,index_to_code,{}) 
         except:
@@ -98,10 +100,7 @@ def extract_dataflow(code, parser,lang):
                 indexs.add(d[1])
             for x in d[-1]:
                 indexs.add(x)
-        new_DFG=[]
-        for d in DFG:
-            if d[1] in indexs:
-                new_DFG.append(d)
+        new_DFG = [d for d in DFG if d[1] in indexs]
         dfg=new_DFG
     except:
         dfg=[]
@@ -149,20 +148,25 @@ def convert_examples_to_features(item):
     #source
     url1,url2,label,tokenizer, args,cache,url_to_code=item
     parser=parsers['java']
-    
+
     for url in [url1,url2]:
         if url not in cache:
             func=url_to_code[url]
-            
+
             #extract data flow
             code_tokens,dfg=extract_dataflow(func,parser,'java')
-            code_tokens=[tokenizer.tokenize('@ '+x)[1:] if idx!=0 else tokenizer.tokenize(x) for idx,x in enumerate(code_tokens)]
-            ori2cur_pos={}
-            ori2cur_pos[-1]=(0,0)
+            code_tokens = [
+                tokenizer.tokenize(f'@ {x}')[1:]
+                if idx != 0
+                else tokenizer.tokenize(x)
+                for idx, x in enumerate(code_tokens)
+            ]
+
+            ori2cur_pos = {-1: (0, 0)}
             for i in range(len(code_tokens)):
-                ori2cur_pos[i]=(ori2cur_pos[i-1][1],ori2cur_pos[i-1][1]+len(code_tokens[i]))    
+                ori2cur_pos[i]=(ori2cur_pos[i-1][1],ori2cur_pos[i-1][1]+len(code_tokens[i]))
             code_tokens=[y for x in code_tokens for y in x]  
-            
+
             #truncating
             code_tokens=code_tokens[:args.code_length+args.data_flow_length-3-min(len(dfg),args.data_flow_length)][:512-3]
             source_tokens =[tokenizer.cls_token]+code_tokens+[tokenizer.sep_token]
@@ -170,27 +174,25 @@ def convert_examples_to_features(item):
             position_idx = [i+tokenizer.pad_token_id + 1 for i in range(len(source_tokens))]
             dfg=dfg[:args.code_length+args.data_flow_length-len(source_tokens)]
             source_tokens+=[x[0] for x in dfg]
-            position_idx+=[0 for x in dfg]
-            source_ids+=[tokenizer.unk_token_id for x in dfg]
+            position_idx += [0 for _ in dfg]
+            source_ids += [tokenizer.unk_token_id for _ in dfg]
             padding_length=args.code_length+args.data_flow_length-len(source_ids)
             position_idx+=[tokenizer.pad_token_id]*padding_length
             source_ids+=[tokenizer.pad_token_id]*padding_length      
-            
+
             #reindex
-            reverse_index={}
+            reverse_index = {x[1]: idx for idx, x in enumerate(dfg)}
             for idx,x in enumerate(dfg):
-                reverse_index[x[1]]=idx
-            for idx,x in enumerate(dfg):
-                dfg[idx]=x[:-1]+([reverse_index[i] for i in x[-1] if i in reverse_index],)    
+                dfg[idx]=x[:-1]+([reverse_index[i] for i in x[-1] if i in reverse_index],)
             dfg_to_dfg=[x[-1] for x in dfg]
             dfg_to_code=[ori2cur_pos[x[1]] for x in dfg]
             length=len([tokenizer.cls_token])
-            dfg_to_code=[(x[0]+length,x[1]+length) for x in dfg_to_code]        
+            dfg_to_code=[(x[0]+length,x[1]+length) for x in dfg_to_code]
             cache[url]=source_tokens,source_ids,position_idx,dfg_to_code,dfg_to_dfg
 
-        
-    source_tokens_1,source_ids_1,position_idx_1,dfg_to_code_1,dfg_to_dfg_1=cache[url1]   
-    source_tokens_2,source_ids_2,position_idx_2,dfg_to_code_2,dfg_to_dfg_2=cache[url2]   
+
+    source_tokens_1,source_ids_1,position_idx_1,dfg_to_code_1,dfg_to_dfg_1=cache[url1]
+    source_tokens_2,source_ids_2,position_idx_2,dfg_to_code_2,dfg_to_dfg_2=cache[url2]
     return InputFeatures(source_tokens_1,source_ids_1,position_idx_1,dfg_to_code_1,dfg_to_dfg_1,
                    source_tokens_2,source_ids_2,position_idx_2,dfg_to_code_2,dfg_to_dfg_2,
                      label,url1,url2)
@@ -200,7 +202,7 @@ class TextDataset(Dataset):
         self.examples = []
         self.args=args
         index_filename=file_path
-        
+
         #load index
         logger.info("Creating features from index file at %s ", index_filename)
         url_to_code={}
@@ -209,7 +211,7 @@ class TextDataset(Dataset):
                 line=line.strip()
                 js=json.loads(line)
                 url_to_code[js['idx']]=js['func']
-                
+
         #load code function according to index
         data=[]
         cache={}
@@ -220,35 +222,32 @@ class TextDataset(Dataset):
                 url1,url2,label=line.split('\t')
                 if url1 not in url_to_code or url2 not in url_to_code:
                     continue
-                if label=='0':
-                    label=0
-                else:
-                    label=1
+                label = 0 if label=='0' else 1
                 data.append((url1,url2,label,tokenizer, args,cache,url_to_code))
-                
+
         #only use 10% valid data to keep best model        
         if 'valid' in file_path:
             data=random.sample(data,int(len(data)*0.1))
-            
+
         #convert example to input features    
         self.examples=[convert_examples_to_features(x) for x in tqdm(data,total=len(data))]
-        
+
         if 'train' in file_path:
             for idx, example in enumerate(self.examples[:3]):
                 logger.info("*** Example ***")
-                logger.info("idx: {}".format(idx))
-                logger.info("label: {}".format(example.label))
+                logger.info(f"idx: {idx}")
+                logger.info(f"label: {example.label}")
                 logger.info("input_tokens_1: {}".format([x.replace('\u0120','_') for x in example.input_tokens_1]))
-                logger.info("input_ids_1: {}".format(' '.join(map(str, example.input_ids_1))))       
-                logger.info("position_idx_1: {}".format(example.position_idx_1))
-                logger.info("dfg_to_code_1: {}".format(' '.join(map(str, example.dfg_to_code_1))))
-                logger.info("dfg_to_dfg_1: {}".format(' '.join(map(str, example.dfg_to_dfg_1))))
-                
+                logger.info(f"input_ids_1: {' '.join(map(str, example.input_ids_1))}")
+                logger.info(f"position_idx_1: {example.position_idx_1}")
+                logger.info(f"dfg_to_code_1: {' '.join(map(str, example.dfg_to_code_1))}")
+                logger.info(f"dfg_to_dfg_1: {' '.join(map(str, example.dfg_to_dfg_1))}")
+
                 logger.info("input_tokens_2: {}".format([x.replace('\u0120','_') for x in example.input_tokens_2]))
-                logger.info("input_ids_2: {}".format(' '.join(map(str, example.input_ids_2))))       
-                logger.info("position_idx_2: {}".format(example.position_idx_2))
-                logger.info("dfg_to_code_2: {}".format(' '.join(map(str, example.dfg_to_code_2))))
-                logger.info("dfg_to_dfg_2: {}".format(' '.join(map(str, example.dfg_to_dfg_2))))
+                logger.info(f"input_ids_2: {' '.join(map(str, example.input_ids_2))}")
+                logger.info(f"position_idx_2: {example.position_idx_2}")
+                logger.info(f"dfg_to_code_2: {' '.join(map(str, example.dfg_to_code_2))}")
+                logger.info(f"dfg_to_dfg_2: {' '.join(map(str, example.dfg_to_dfg_2))}")
 
 
     def __len__(self):
@@ -259,8 +258,8 @@ class TextDataset(Dataset):
         attn_mask_1= np.zeros((self.args.code_length+self.args.data_flow_length,
                         self.args.code_length+self.args.data_flow_length),dtype=np.bool)
         #calculate begin index of node and max length of input
-        node_index=sum([i>1 for i in self.examples[item].position_idx_1])
-        max_length=sum([i!=1 for i in self.examples[item].position_idx_1])
+        node_index = sum(i>1 for i in self.examples[item].position_idx_1)
+        max_length = sum(i!=1 for i in self.examples[item].position_idx_1)
         #sequence can attend to sequence
         attn_mask_1[:node_index,:node_index]=True
         #special tokens attend to all tokens
@@ -277,13 +276,13 @@ class TextDataset(Dataset):
             for a in nodes:
                 if a+node_index<len(self.examples[item].position_idx_1):
                     attn_mask_1[idx+node_index,a+node_index]=True  
-                    
+
         #calculate graph-guided masked function
         attn_mask_2= np.zeros((self.args.code_length+self.args.data_flow_length,
                         self.args.code_length+self.args.data_flow_length),dtype=np.bool)
         #calculate begin index of node and max length of input
-        node_index=sum([i>1 for i in self.examples[item].position_idx_2])
-        max_length=sum([i!=1 for i in self.examples[item].position_idx_2])
+        node_index = sum(i>1 for i in self.examples[item].position_idx_2)
+        max_length = sum(i!=1 for i in self.examples[item].position_idx_2)
         #sequence can attend to sequence
         attn_mask_2[:node_index,:node_index]=True
         #special tokens attend to all tokens
@@ -300,7 +299,7 @@ class TextDataset(Dataset):
             for a in nodes:
                 if a+node_index<len(self.examples[item].position_idx_2):
                     attn_mask_2[idx+node_index,a+node_index]=True                      
-                    
+
         return (torch.tensor(self.examples[item].input_ids_1),
                 torch.tensor(self.examples[item].position_idx_1),
                 torch.tensor(attn_mask_1), 
@@ -324,19 +323,33 @@ def train(args, train_dataset, model, tokenizer):
     #build dataloader
     train_sampler = RandomSampler(train_dataset)
     train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size,num_workers=4)
-    
+
     args.max_steps=args.epochs*len( train_dataloader)
     args.save_steps=len( train_dataloader)//10
     args.warmup_steps=args.max_steps//5
     model.to(args.device)
-    
+
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-         'weight_decay': args.weight_decay},
-        {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+        {
+            'params': [
+                p
+                for n, p in model.named_parameters()
+                if all(nd not in n for nd in no_decay)
+            ],
+            'weight_decay': args.weight_decay,
+        },
+        {
+            'params': [
+                p
+                for n, p in model.named_parameters()
+                if any(nd in n for nd in no_decay)
+            ],
+            'weight_decay': 0.0,
+        },
     ]
+
     optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps,
                                                 num_training_steps=args.max_steps)
@@ -353,13 +366,13 @@ def train(args, train_dataset, model, tokenizer):
     logger.info("  Total train batch size = %d",args.train_batch_size*args.gradient_accumulation_steps)
     logger.info("  Gradient Accumulation steps = %d", args.gradient_accumulation_steps)
     logger.info("  Total optimization steps = %d", args.max_steps)
-    
+
     global_step=0
     tr_loss, logging_loss,avg_loss,tr_nb,tr_num,train_loss = 0.0, 0.0,0.0,0,0,0
     best_f1=0
 
     model.zero_grad()
- 
+
     for idx in range(args.epochs): 
         bar = tqdm(train_dataloader,total=len(train_dataloader))
         tr_num=0
@@ -373,7 +386,7 @@ def train(args, train_dataset, model, tokenizer):
 
             if args.n_gpu > 1:
                 loss = loss.mean()
-                
+
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
 
@@ -385,34 +398,34 @@ def train(args, train_dataset, model, tokenizer):
             train_loss+=loss.item()
             if avg_loss==0:
                 avg_loss=tr_loss
-                
+
             avg_loss=round(train_loss/tr_num,5)
-            bar.set_description("epoch {} loss {}".format(idx,avg_loss))
-              
+            bar.set_description(f"epoch {idx} loss {avg_loss}")
+
             if (step + 1) % args.gradient_accumulation_steps == 0:
                 optimizer.step()
                 optimizer.zero_grad()
-                scheduler.step()  
+                scheduler.step()
                 global_step += 1
                 output_flag=True
                 avg_loss=round(np.exp((tr_loss - logging_loss) /(global_step- tr_nb)),4)
 
                 if global_step % args.save_steps == 0:
                     results = evaluate(args, model, tokenizer, eval_when_training=True)    
-                    
+
                     # Save model checkpoint
                     if results['eval_f1']>best_f1:
                         best_f1=results['eval_f1']
-                        logger.info("  "+"*"*20)  
+                        logger.info("  "+"*"*20)
                         logger.info("  Best f1:%s",round(best_f1,4))
                         logger.info("  "+"*"*20)                          
-                        
+
                         checkpoint_prefix = 'checkpoint-best-f1'
-                        output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))                        
+                        output_dir = os.path.join(args.output_dir, f'{checkpoint_prefix}')
                         if not os.path.exists(output_dir):
-                            os.makedirs(output_dir)                        
+                            os.makedirs(output_dir)
                         model_to_save = model.module if hasattr(model,'module') else model
-                        output_dir = os.path.join(output_dir, '{}'.format('model.bin')) 
+                        output_dir = os.path.join(output_dir, 'model.bin')
                         torch.save(model_to_save.state_dict(), output_dir)
                         logger.info("Saving model checkpoint to %s", output_dir)
                         
@@ -430,11 +443,10 @@ def evaluate(args, model, tokenizer, eval_when_training=False):
     logger.info("***** Running evaluation *****")
     logger.info("  Num examples = %d", len(eval_dataset))
     logger.info("  Batch size = %d", args.eval_batch_size)
-    
+
     eval_loss = 0.0
-    nb_eval_steps = 0
     model.eval()
-    logits=[]  
+    logits=[]
     y_trues=[]
     for batch in eval_dataloader:
         (inputs_ids_1,position_idx_1,attn_mask_1,
@@ -445,8 +457,6 @@ def evaluate(args, model, tokenizer, eval_when_training=False):
             eval_loss += lm_loss.mean().item()
             logits.append(logit.cpu().numpy())
             y_trues.append(labels.cpu().numpy())
-        nb_eval_steps += 1
-    
     #calculate scores
     logits=np.concatenate(logits,0)
     y_trues=np.concatenate(y_trues,0)
@@ -457,15 +467,15 @@ def evaluate(args, model, tokenizer, eval_when_training=False):
     from sklearn.metrics import recall_score
     recall=recall_score(y_trues, y_preds, average='macro')
     from sklearn.metrics import precision_score
-    precision=precision_score(y_trues, y_preds, average='macro')   
+    precision=precision_score(y_trues, y_preds, average='macro')
     from sklearn.metrics import f1_score
-    f1=f1_score(y_trues, y_preds, average='macro')             
+    f1=f1_score(y_trues, y_preds, average='macro')
     result = {
         "eval_recall": float(recall),
         "eval_precision": float(precision),
         "eval_f1": float(f1),
         "eval_threshold":best_threshold,
-        
+
     }
 
     logger.info("***** Eval results *****")
@@ -489,9 +499,8 @@ def test(args, model, tokenizer, best_threshold=0):
     logger.info("  Num examples = %d", len(eval_dataset))
     logger.info("  Batch size = %d", args.eval_batch_size)
     eval_loss = 0.0
-    nb_eval_steps = 0
     model.eval()
-    logits=[]  
+    logits=[]
     y_trues=[]
     for batch in eval_dataloader:
         (inputs_ids_1,position_idx_1,attn_mask_1,
@@ -502,8 +511,6 @@ def test(args, model, tokenizer, best_threshold=0):
             eval_loss += lm_loss.mean().item()
             logits.append(logit.cpu().numpy())
             y_trues.append(labels.cpu().numpy())
-        nb_eval_steps += 1
-    
     #output result
     logits=np.concatenate(logits,0)
     y_preds=logits[:,1]>best_threshold
@@ -528,7 +535,7 @@ def main():
                         help="An optional input evaluation data file to evaluate the perplexity on (a text file).")
     parser.add_argument("--test_data_file", default=None, type=str,
                         help="An optional input evaluation data file to evaluate the perplexity on (a text file).")
-                    
+
     parser.add_argument("--model_name_or_path", default=None, type=str,
                         help="The model checkpoint for weights initialization.")
 
@@ -538,15 +545,15 @@ def main():
                         help="Optional pretrained tokenizer name or path if not the same as model_name_or_path")
 
     parser.add_argument("--code_length", default=256, type=int,
-                        help="Optional Code input sequence length after tokenization.") 
+                        help="Optional Code input sequence length after tokenization.")
     parser.add_argument("--data_flow_length", default=64, type=int,
-                        help="Optional Data Flow input sequence length after tokenization.") 
+                        help="Optional Data Flow input sequence length after tokenization.")
     parser.add_argument("--do_train", action='store_true',
                         help="Whether to run training.")
     parser.add_argument("--do_eval", action='store_true',
                         help="Whether to run eval on the dev set.")
     parser.add_argument("--do_test", action='store_true',
-                        help="Whether to run eval on the dev set.")    
+                        help="Whether to run eval on the dev set.")
     parser.add_argument("--evaluate_during_training", action='store_true',
                         help="Run evaluation during training at each logging step.")
 
@@ -589,7 +596,10 @@ def main():
 
     # Set seed
     set_seed(args)
-    config = RobertaConfig.from_pretrained(args.config_name if args.config_name else args.model_name_or_path)
+    config = RobertaConfig.from_pretrained(
+        args.config_name or args.model_name_or_path
+    )
+
     config.num_labels=1
     tokenizer = RobertaTokenizer.from_pretrained(args.tokenizer_name)
     model = RobertaForSequenceClassification.from_pretrained(args.model_name_or_path,config=config)    
@@ -601,23 +611,21 @@ def main():
         train_dataset = TextDataset(tokenizer, args, file_path=args.train_data_file)
         train(args, train_dataset, model, tokenizer)
 
-    # Evaluation
-    results = {}
     if args.do_eval:
         checkpoint_prefix = 'checkpoint-best-f1/model.bin'
-        output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))  
+        output_dir = os.path.join(args.output_dir, f'{checkpoint_prefix}')
         model.load_state_dict(torch.load(output_dir))
         model.to(args.device)
         result=evaluate(args, model, tokenizer)
-        
+
     if args.do_test:
         checkpoint_prefix = 'checkpoint-best-f1/model.bin'
-        output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))  
+        output_dir = os.path.join(args.output_dir, f'{checkpoint_prefix}')
         model.load_state_dict(torch.load(output_dir))
         model.to(args.device)
         test(args, model, tokenizer,best_threshold=0.5)
 
-    return results
+    return {}
 
 
 if __name__ == "__main__":

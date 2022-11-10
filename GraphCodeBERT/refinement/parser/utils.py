@@ -24,13 +24,12 @@ def remove_comments_and_docstrings(source,lang):
             # Remove comments:
             if token_type == tokenize.COMMENT:
                 pass
-            # This series of conditionals removes docstrings:
             elif token_type == tokenize.STRING:
-                if prev_toktype != tokenize.INDENT:
-            # This is likely a docstring; double-check we're not inside an operator:
-                    if prev_toktype != tokenize.NEWLINE:
-                        if start_col > 0:
-                            out += token_string
+                if (
+                    prev_toktype not in [tokenize.INDENT, tokenize.NEWLINE]
+                    and start_col > 0
+                ):
+                    out += token_string
             else:
                 out += token_string
             prev_toktype = token_type
@@ -46,10 +45,8 @@ def remove_comments_and_docstrings(source,lang):
     else:
         def replacer(match):
             s = match.group(0)
-            if s.startswith('/'):
-                return " " # note: a space and not an empty string
-            else:
-                return s
+            return " " if s.startswith('/') else s
+
         pattern = re.compile(
             r'//.*?$|/\*.*?\*/|\'(?:\\.|[^\\\'])*\'|"(?:\\.|[^\\"])*"',
             re.DOTALL | re.MULTILINE
@@ -63,11 +60,10 @@ def remove_comments_and_docstrings(source,lang):
 def tree_to_token_index(root_node):
     if (len(root_node.children)==0 or root_node.type=='string') and root_node.type!='comment':
         return [(root_node.start_point,root_node.end_point)]
-    else:
-        code_tokens=[]
-        for child in root_node.children:
-            code_tokens+=tree_to_token_index(child)
-        return code_tokens
+    code_tokens=[]
+    for child in root_node.children:
+        code_tokens+=tree_to_token_index(child)
+    return code_tokens
     
 def tree_to_variable_index(root_node,index_to_code):
     if (len(root_node.children)==0 or root_node.type=='string') and root_node.type!='comment':
